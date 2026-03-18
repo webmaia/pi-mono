@@ -184,6 +184,7 @@ export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 export interface UserMessage {
 	role: "user";
 	content: string | (TextContent | ImageContent)[];
+	messageId?: string;
 	timestamp: number; // Unix timestamp in milliseconds
 }
 

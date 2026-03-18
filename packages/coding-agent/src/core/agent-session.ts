@@ -23,7 +23,7 @@ import type {
 	AgentTool,
 	ThinkingLevel,
 } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@mariozechner/pi-ai";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent, UserMessage } from "@mariozechner/pi-ai";
 import { isContextOverflow, modelsAreEqual, resetApiProviders, supportsXhigh } from "@mariozechner/pi-ai";
 import { getDocsPath } from "../config.js";
 import { theme } from "../modes/interactive/theme/theme.js";
@@ -180,6 +180,8 @@ export interface PromptOptions {
 	streamingBehavior?: "steer" | "followUp";
 	/** Source of input for extension input event handlers. Defaults to "interactive". */
 	source?: InputSource;
+	/** Caller-provided message ID for deduplication and traceability. Propagated to UserMessage. */
+	messageId?: string;
 }
 
 /** Result from cycleModel() */
@@ -1020,11 +1022,13 @@ export class AgentSession {
 		if (currentImages) {
 			userContent.push(...currentImages);
 		}
-		messages.push({
+		const userMessage: UserMessage = {
 			role: "user",
 			content: userContent,
 			timestamp: Date.now(),
-		});
+		};
+		if (options?.messageId) userMessage.messageId = options.messageId;
+		messages.push(userMessage);
 
 		// Inject any pending "nextTurn" messages as context alongside the user message
 		for (const msg of this._pendingNextTurnMessages) {
