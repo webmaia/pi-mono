@@ -1046,10 +1046,10 @@ export class AgentSession {
 				userContent.push(...currentImages);
 			}
 			const userMessage: UserMessage = {
-			role: "user",
-			content: userContent,
-			timestamp: Date.now(),
-		};
+				role: "user",
+				content: userContent,
+				timestamp: Date.now(),
+			};
 			if (options?.messageId) userMessage.messageId = options.messageId;
 			messages.push(userMessage);
 
