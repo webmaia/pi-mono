@@ -207,6 +207,8 @@ export interface UserMessage {
 	role: "user";
 	content: string | (TextContent | ImageContent)[];
 	timestamp: number; // Unix timestamp in milliseconds
+	/** Caller-provided ID for deduplication and traceability. */
+	messageId?: string;
 }
 
 export interface AssistantMessage {
