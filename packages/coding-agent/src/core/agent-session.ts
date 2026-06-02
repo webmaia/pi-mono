@@ -23,7 +23,7 @@ import type {
 	AgentTool,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
@@ -207,7 +207,19 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
+	/** Caller-provided message ID for deduplication and traceability. Propagated to UserMessage. */
+	messageId?: string;
 }
+
+/**
+ * Options for steer() and followUp().
+ * Accepts either an ImageContent array (legacy) or an options object with images and messageId.
+ * @deprecated Passing ImageContent[] directly is supported for backward compatibility.
+ *   Prefer the object form: { images, messageId }.
+ */
+export type QueueMessageOptions =
+	| ImageContent[]
+	| Omit<PromptOptions, "expandPromptTemplates" | "streamingBehavior" | "source">;
 
 /** Result from cycleModel() */
 export interface ModelCycleResult {
@@ -1035,9 +1047,9 @@ export class AgentSession {
 					);
 				}
 				if (options.streamingBehavior === "followUp") {
-					await this._queueFollowUp(expandedText, currentImages);
+					await this._queueFollowUp(expandedText, { images: currentImages, messageId: options?.messageId });
 				} else {
-					await this._queueSteer(expandedText, currentImages);
+					await this._queueSteer(expandedText, { images: currentImages, messageId: options?.messageId });
 				}
 				preflightResult?.(true);
 				return;
@@ -1084,11 +1096,13 @@ export class AgentSession {
 			if (currentImages) {
 				userContent.push(...currentImages);
 			}
-			messages.push({
+			const userMessage: UserMessage = {
 				role: "user",
 				content: userContent,
 				timestamp: Date.now(),
-			});
+			};
+			if (options?.messageId) userMessage.messageId = options.messageId;
+			messages.push(userMessage);
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
 			for (const msg of this._pendingNextTurnMessages) {
@@ -1204,7 +1218,7 @@ export class AgentSession {
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
-	async steer(text: string, images?: ImageContent[]): Promise<void> {
+	async steer(text: string, options?: QueueMessageOptions): Promise<void> {
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -1214,17 +1228,19 @@ export class AgentSession {
 		let expandedText = this._expandSkillCommand(text);
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 
-		await this._queueSteer(expandedText, images);
+		const images = Array.isArray(options) ? options : options?.images;
+		const messageId = Array.isArray(options) ? undefined : options?.messageId;
+		await this._queueSteer(expandedText, { images, messageId });
 	}
 
 	/**
 	 * Queue a follow-up message to be processed after the agent finishes.
 	 * Delivered only when agent has no more tool calls or steering messages.
 	 * Expands skill commands and prompt templates. Errors on extension commands.
-	 * @param images Optional image attachments to include with the message
+	 * @param options Image attachments and/or messageId (or legacy ImageContent[])
 	 * @throws Error if text is an extension command
 	 */
-	async followUp(text: string, images?: ImageContent[]): Promise<void> {
+	async followUp(text: string, options?: QueueMessageOptions): Promise<void> {
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -1234,41 +1250,50 @@ export class AgentSession {
 		let expandedText = this._expandSkillCommand(text);
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 
-		await this._queueFollowUp(expandedText, images);
+		const images = Array.isArray(options) ? options : options?.images;
+		const messageId = Array.isArray(options) ? undefined : options?.messageId;
+		await this._queueFollowUp(expandedText, { images, messageId });
 	}
 
 	/**
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueSteer(text: string, options?: { images?: ImageContent[]; messageId?: string }): Promise<void> {
 		this._steeringMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
-		if (images) {
-			content.push(...images);
+		if (options?.images) {
+			content.push(...options.images);
 		}
-		this.agent.steer({
+		const msg: UserMessage = {
 			role: "user",
 			content,
 			timestamp: Date.now(),
-		});
+		};
+		if (options?.messageId) msg.messageId = options.messageId;
+		this.agent.steer(msg);
 	}
 
 	/**
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+	private async _queueFollowUp(
+		text: string,
+		options?: { images?: ImageContent[]; messageId?: string },
+	): Promise<void> {
 		this._followUpMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
-		if (images) {
-			content.push(...images);
+		if (options?.images) {
+			content.push(...options.images);
 		}
-		this.agent.followUp({
+		const msg: UserMessage = {
 			role: "user",
 			content,
 			timestamp: Date.now(),
-		});
+		};
+		if (options?.messageId) msg.messageId = options.messageId;
+		this.agent.followUp(msg);
 	}
 
 	/**
